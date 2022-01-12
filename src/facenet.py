@@ -106,7 +106,11 @@ def create_input_pipeline(input_queue, image_size, nrof_preprocess_threads, batc
         filenames, label, control = input_queue.dequeue()
         images = []
         for filename in tf.unstack(filenames):
-            file_contents = tf.read_file(filename)
+            # file_contents = tf.read_file(filename)
+            try:
+                file_contents = tf.io.read_file(filename) # for tf 1.15
+            except Exception as e:
+                file_contents = tf.read_file(filename) # for tf 1.7, there is no tf.io
             image = tf.image.decode_image(file_contents, 3)
             image = tf.cond(get_control_flag(control[0], RANDOM_ROTATE),
                             lambda:tf.py_func(random_rotate_image, [image], tf.uint8), 
@@ -117,6 +121,7 @@ def create_input_pipeline(input_queue, image_size, nrof_preprocess_threads, batc
             image = tf.cond(get_control_flag(control[0], RANDOM_FLIP),
                             lambda:tf.image.random_flip_left_right(image),
                             lambda:tf.identity(image))
+            image = tf.cast(image, dtype=tf.float32) # for tf 1.15, tf.image.per_image_standardization will not cast the input to float32 automatically, so we do the cast in advance
             image = tf.cond(get_control_flag(control[0], FIXED_STANDARDIZATION),
                             lambda:(tf.cast(image, tf.float32) - 127.5)/128.0,
                             lambda:tf.image.per_image_standardization(image))
