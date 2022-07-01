@@ -29,6 +29,9 @@ from __future__ import print_function
 
 import os
 import numpy as np
+import sys
+this_dir = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(this_dir)
 import facenet
 
 def evaluate(embeddings, actual_issame, nrof_folds=10, distance_metric=0, subtract_mean=False):
