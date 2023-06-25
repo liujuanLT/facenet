@@ -28,15 +28,14 @@ in the same directory, and the metagraph should have the extension '.meta'.
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-import os
-import sys
+
 import tensorflow as tf
 import numpy as np
 import argparse
-sys.path.append('/home/jliu/codes/facenet/src/')
 import facenet
 import lfw
-
+import os
+import sys
 from tensorflow.python.ops import data_flow_ops
 from sklearn import metrics
 from scipy.optimize import brentq

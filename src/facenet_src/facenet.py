@@ -162,22 +162,16 @@ def create_input_pipeline_TBD(input_queue, image_size, nrof_preprocess_threads, 
     return image_batch, label_batch
 
 def train_resize_(image, image_size, control):
-    # force resize
-    # image.set_shape([112,112,3]) # TODO, change manullay 
-    # image = tf.image.resize_images(image, (image_size[0], image_size[1]))
-
     image = tf.cast(image, dtype=tf.float32)
     image = tf.cond(get_control_flag(control[0], RANDOM_CROP), 
-                        lambda:tf.random_crop(image, image_size + (3,)), 
-                        lambda:tf.image.resize_image_with_crop_or_pad(image, image_size[0], image_size[1]))
+                            lambda:tf.random_crop(image, image_size + (3,)), 
+                            lambda:tf.image.resize_image_with_crop_or_pad(image, image_size[0], image_size[1]))
     return image
 
 def val_resize_(image, image_size, control):
-    # force resize
-    # image.set_shape([112,112,3]) # TODO, change manullay
-    # image = tf.image.resize_images(image, (image_size[0], image_size[1]))
-    
+    #image.set_shape([112,96,3])
     image = tf.cast(image, dtype=tf.float32)    
+    #image = tf.image.resize_images(image, (image_size[0], image_size[1]))
     image = tf.image.resize_image_with_crop_or_pad(image, image_size[0], image_size[1])
     return image
 
@@ -192,16 +186,13 @@ def create_input_pipeline(input_queue, image_size, nrof_preprocess_threads, batc
                 file_contents = tf.io.read_file(filename) # for tf 1.15
             except Exception as e:
                 file_contents = tf.read_file(filename) # for tf 1.7, there is no tf.io
-            image = tf.image.decode_image(file_contents, 3) # force channel -3 to hangle grey images
+            image = tf.image.decode_image(file_contents, 3)
             image = tf.cond(get_control_flag(control[0], RANDOM_ROTATE),
                             lambda:tf.py_func(random_rotate_image, [image], tf.uint8), 
                             lambda:tf.identity(image))
-            # image = tf.cond(is_train[0],
-            #                 lambda:train_resize_(image, image_size, control), 
-            #                 lambda:val_resize_(image, image_size, control))
-            image.set_shape([112,96,3]) # TODO, change manullay
-            image = tf.image.resize_images(image, (image_size[0], image_size[1]))
-
+            image = tf.cond(is_train[0],
+                            lambda:train_resize_(image, image_size, control), 
+                            lambda:val_resize_(image, image_size, control))
             image = tf.cond(get_control_flag(control[0], RANDOM_FLIP),
                             lambda:tf.image.random_flip_left_right(image),
                             lambda:tf.identity(image))
@@ -224,7 +215,6 @@ def create_input_pipeline(input_queue, image_size, nrof_preprocess_threads, batc
         allow_smaller_final_batch=True)
     
     return image_batch, label_batch    
-
 
 def get_control_flag(control, field):
     return tf.equal(tf.mod(tf.floor_div(control, field), 2), 1)
@@ -270,7 +260,7 @@ def train(total_loss, global_step, optimizer, learning_rate, moving_average_deca
         elif optimizer=='RMSPROP':
             opt = tf.train.RMSPropOptimizer(learning_rate, decay=0.9, momentum=0.9, epsilon=1.0)
         elif optimizer=='MOM':
-            opt = tf.train.MomentumOptimizer(learning_rate, 0.9)
+            opt = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
         else:
             raise ValueError('Invalid optimization algorithm')
     

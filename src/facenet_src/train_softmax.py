@@ -38,7 +38,6 @@ import argparse
 from . import facenet
 sys.path.append('/home/jliu/codes/facenet/src/')
 from . import lfw
-from . import arcface
 import h5py
 import math
 import tensorflow.contrib.slim as slim
@@ -47,6 +46,7 @@ from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 
 def main(args):
+  
     network = importlib.import_module(args.model_def)
     image_size = (args.image_size, args.image_size)
 
@@ -140,7 +140,7 @@ def main(args):
         
         print('Building training graph')
         
-        if not args.model_def == 'models.inception_v3' and (args.use_arcface==0):
+        if not args.model_def == 'models.inception_v3':
                 
             # Build the inference graph
             prelogits, out2 = network.inference(image_batch, args.keep_probability, 
@@ -178,58 +178,6 @@ def main(args):
             # Calculate the total losses
             regularization_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
             total_loss = tf.add_n([cross_entropy_mean] + regularization_losses, name='total_loss')
-
-            # Build a Graph that trains the model with one batch of examples and updates the model parameters
-            train_op = facenet.train(total_loss, global_step, args.optimizer, 
-                learning_rate, args.moving_average_decay, tf.global_variables(), args.log_histograms)
-
-        if not args.model_def == 'models.inception_v3' and args.use_arcface==1:
-            print('use arcface!!!')
-            # Build the inference graph
-            prelogits, out2 = network.inference(image_batch, args.keep_probability, 
-                phase_train=phase_train_placeholder, bottleneck_layer_size=args.embedding_size, 
-                weight_decay=args.weight_decay)
-            w_init_method = tf.contrib.layers.xavier_initializer(uniform=False)
-            logits = arcface.arcface_loss(prelogits, label_batch, out_num=len(train_set), w_init=w_init_method)
-        
-            embeddings = tf.nn.l2_normalize(prelogits, 1, 1e-10, name='embeddings')
-
-            # Norm for the prelogits
-            eps = 1e-4
-            prelogits_norm = tf.reduce_mean(tf.norm(tf.abs(prelogits)+eps, ord=args.prelogits_norm_p, axis=1))
-            # tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, prelogits_norm * args.prelogits_norm_loss_factor)
-
-            # Add center loss
-            prelogits_center_loss, _ = facenet.center_loss(prelogits, label_batch, args.center_loss_alfa, nrof_classes)
-            # tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, prelogits_center_loss * args.center_loss_factor)
-
-            # learning_rate = tf.train.exponential_decay(learning_rate_placeholder, global_step,
-                # args.learning_rate_decay_epochs*args.epoch_size, args.learning_rate_decay_factor, staircase=True)
-            p = int(512.0/args.batch_size)
-            lr_steps = [p*val for val in args.lr_steps]
-            print(lr_steps)
-            learning_rate = tf.train.piecewise_constant(global_step, boundaries=lr_steps, values=args.base_lr_schedule, name='lr_schedule')
-      
-            tf.summary.scalar('learning_rate', learning_rate)
-
-            # Calculate the average cross entropy loss across the batch
-            cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                labels=label_batch, logits=logits, name='cross_entropy_per_example')
-            cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-            tf.add_to_collection('losses', cross_entropy_mean)
-            
-            correct_prediction = tf.cast(tf.equal(tf.argmax(logits, 1), tf.cast(label_batch, tf.int64)), tf.float32)
-            accuracy = tf.reduce_mean(correct_prediction)
-            
-            # Calculate the total losses
-            regularization_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
-            total_loss = tf.add_n([cross_entropy_mean] + regularization_losses, name='total_loss')
-            # total_loss = tf.add_n([cross_entropy_mean], name='total_loss')
-
-            # Build a Graph that trains the model with one batch of examples and updates the model parameters
-            train_op = facenet.train(total_loss, global_step, args.optimizer, 
-                learning_rate, args.moving_average_decay, tf.global_variables(), args.log_histograms)
-
 
         if args.model_def == 'models.inception_v3':
             print('!!!!!!!!!!!!!models.inception_v3')
@@ -286,23 +234,18 @@ def main(args):
             regularization_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
             total_loss = tf.add_n([cross_entropy_mean, 0.4 * cross_entropy_mean_aux] + regularization_losses, name='total_loss')
 
-            # Build a Graph that trains the model with one batch of examples and updates the model parameters
-            train_op = facenet.train(total_loss, global_step, args.optimizer, 
-                learning_rate, args.moving_average_decay, tf.global_variables(), args.log_histograms)
+        # Build a Graph that trains the model with one batch of examples and updates the model parameters
+        train_op = facenet.train(total_loss, global_step, args.optimizer, 
+            learning_rate, args.moving_average_decay, tf.global_variables(), args.log_histograms)
         
         # Create a saver
-        # saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=3)
-        g_list = tf.global_variables()
-        bn_moving_vars = [g for g in g_list if 'bn/moving_mean' in g.name]
-        bn_moving_vars += [g for g in g_list if 'bn/moving_variance' in g.name]
-        save_var_list = tf.trainable_variables() + bn_moving_vars
-        saver = tf.train.Saver(var_list=save_var_list, max_to_keep=5)
+        saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=3)
 
         # Build the summary operation based on the TF collection of Summaries.
         summary_op = tf.summary.merge_all()
 
         # Start running operations on the Graph.
-        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_memory_fraction, allow_growth=True)
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_memory_fraction)
         sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=False))
         sess.run(tf.global_variables_initializer())
         sess.run(tf.local_variables_initializer())
@@ -342,26 +285,23 @@ def main(args):
                 step = sess.run(global_step, feed_dict=None)
                 # Train for one epoch
                 t = time.time()
-                need_feed_learn_rate = not (not args.model_def == 'models.inception_v3' and args.use_arcface==1)
                 cont = train(args, sess, epoch, image_list, label_list, index_dequeue_op, enqueue_op, image_paths_placeholder, labels_placeholder,
-                    phase_train_placeholder, batch_size_placeholder, control_placeholder, global_step, 
+                    learning_rate_placeholder, phase_train_placeholder, batch_size_placeholder, control_placeholder, global_step, 
                     total_loss, train_op, summary_op, summary_writer, regularization_losses, args.learning_rate_schedule_file,
                     stat, cross_entropy_mean, accuracy, learning_rate,
-                    prelogits, prelogits_center_loss, args.random_rotate, args.random_crop, args.random_flip, prelogits_norm, args.prelogits_hist_max, args.use_fixed_image_standardization,
-                    embeddings, label_batch, lfw_paths, actual_issame, log_dir,
-                    saver, model_dir, subdir, learning_rate_placeholder, need_feed_learn_rate)
+                    prelogits, prelogits_center_loss, args.random_rotate, args.random_crop, args.random_flip, prelogits_norm, args.prelogits_hist_max, args.use_fixed_image_standardization)
                 stat['time_train'][epoch-1] = time.time() - t
                 
                 if not cont:
                     break
                   
                 t = time.time()
-                # if len(val_image_list)>0 and ((epoch-1) % args.validate_every_n_epochs == args.validate_every_n_epochs-1 or epoch==args.max_nrof_epochs):
-                #     validate(args, sess, epoch, val_image_list, val_label_list, enqueue_op, image_paths_placeholder, labels_placeholder, control_placeholder,
-                #         phase_train_placeholder, batch_size_placeholder, 
-                #         stat, total_loss, regularization_losses, cross_entropy_mean, accuracy, args.validate_every_n_epochs, args.use_fixed_image_standardization)
+                if len(val_image_list)>0 and ((epoch-1) % args.validate_every_n_epochs == args.validate_every_n_epochs-1 or epoch==args.max_nrof_epochs):
+                    validate(args, sess, epoch, val_image_list, val_label_list, enqueue_op, image_paths_placeholder, labels_placeholder, control_placeholder,
+                        phase_train_placeholder, batch_size_placeholder, 
+                        stat, total_loss, regularization_losses, cross_entropy_mean, accuracy, args.validate_every_n_epochs, args.use_fixed_image_standardization)
                 stat['time_validate'][epoch-1] = time.time() - t
-                print('flag1!!!!!')
+
                 # Save variables and the metagraph if it doesn't exist already
                 save_variables_and_metagraph(sess, saver, summary_writer, model_dir, subdir, epoch)
 
@@ -412,23 +352,19 @@ def filter_dataset(dataset, data_filename, percentile, min_nrof_images_per_class
     return filtered_dataset
   
 def train(args, sess, epoch, image_list, label_list, index_dequeue_op, enqueue_op, image_paths_placeholder, labels_placeholder, 
-      phase_train_placeholder, batch_size_placeholder, control_placeholder, step, 
+      learning_rate_placeholder, phase_train_placeholder, batch_size_placeholder, control_placeholder, step, 
       loss, train_op, summary_op, summary_writer, reg_losses, learning_rate_schedule_file, 
       stat, cross_entropy_mean, accuracy, 
-      learning_rate, prelogits, prelogits_center_loss, random_rotate, random_crop, random_flip, prelogits_norm, prelogits_hist_max, use_fixed_image_standardization,
-      embeddings, label_batch, lfw_paths, actual_issame, log_dir,
-      saver, model_dir, subdir,
-      learning_rate_placeholder, need_feed_learn_rate):
+      learning_rate, prelogits, prelogits_center_loss, random_rotate, random_crop, random_flip, prelogits_norm, prelogits_hist_max, use_fixed_image_standardization):
     batch_number = 0
     
-    if need_feed_learn_rate:
-        if args.learning_rate>0.0:
-            lr = args.learning_rate
-        else:
-            lr = facenet.get_learning_rate_from_file(learning_rate_schedule_file, epoch)
-            
-        if lr<=0:
-            return False 
+    if args.learning_rate>0.0:
+        lr = args.learning_rate
+    else:
+        lr = facenet.get_learning_rate_from_file(learning_rate_schedule_file, epoch)
+        
+    if lr<=0:
+        return False 
 
     index_epoch = sess.run(index_dequeue_op)
     label_epoch = np.array(label_list)[index_epoch]
@@ -447,10 +383,7 @@ def train(args, sess, epoch, image_list, label_list, index_dequeue_op, enqueue_o
     train_time = 0
     while batch_number < args.epoch_size:
         start_time = time.time()
-        if need_feed_learn_rate:
-            feed_dict = {learning_rate_placeholder: lr, phase_train_placeholder:True, batch_size_placeholder:args.batch_size}
-        else:
-            feed_dict = {phase_train_placeholder:True, batch_size_placeholder:args.batch_size}
+        feed_dict = {learning_rate_placeholder: lr, phase_train_placeholder:True, batch_size_placeholder:args.batch_size}
         tensor_list = [loss, train_op, step, reg_losses, prelogits, cross_entropy_mean, learning_rate, prelogits_norm, accuracy, prelogits_center_loss]
         if batch_number % 100 == 0:
             loss_, _, step_, reg_losses_, prelogits_, cross_entropy_mean_, lr_, prelogits_norm_, accuracy_, center_loss_, summary_str = sess.run(tensor_list + [summary_op], feed_dict=feed_dict)
@@ -469,16 +402,9 @@ def train(args, sess, epoch, image_list, label_list, index_dequeue_op, enqueue_o
         stat['prelogits_hist'][epoch-1,:] += np.histogram(np.minimum(np.abs(prelogits_), prelogits_hist_max), bins=1000, range=(0.0, prelogits_hist_max))[0]
         
         duration = time.time() - start_time
-        if batch_number == 0 or batch_number == args.epoch_size - 1 or (batch_number+1) % args.show_info_interval == 0:
+        if batch_number ==0 or batch_number == args.epoch_size - 1:
             print('Epoch: [%d][%d/%d]\tTime %.3f\tLoss %2.3f\tXent %2.3f\tRegLoss %2.3f\tAccuracy %2.3f\tLr %2.5f\tCl %2.3f' %
               (epoch, batch_number+1, args.epoch_size, duration, loss_, cross_entropy_mean_, np.sum(reg_losses_), accuracy_, lr_, center_loss_))
-        
-        # if (batch_number+1) % args.validate_interval == 0:
-        #     evaluate(sess, enqueue_op, image_paths_placeholder, labels_placeholder, phase_train_placeholder, batch_size_placeholder, control_placeholder, 
-        #                 embeddings, label_batch, lfw_paths, actual_issame, args.lfw_batch_size, args.lfw_nrof_folds, log_dir, step, summary_writer, stat, epoch, 
-        #                 args.lfw_distance_metric, args.lfw_subtract_mean, args.lfw_use_flipped_images, args.use_fixed_image_standardization)
-        # if (batch_number+1) % args.ckpt_interval == 0:
-        #     save_variables_and_metagraph(sess, saver, summary_writer, model_dir, subdir, epoch)
         batch_number += 1
         train_time += duration
     # Add validation loss and accuracy to summary
@@ -516,7 +442,6 @@ def validate(args, sess, epoch, image_list, label_list, enqueue_op, image_paths_
         loss_array[i], xent_array[i], accuracy_array[i] = (loss_, cross_entropy_mean_, accuracy_)
         if i % 10 == 9:
             print('.', end='')
-            # print('%.5f, %.5f, %.5f'.format(loss, cross_entropy_mean, accuracy))
             sys.stdout.flush()
     print('')
 
@@ -594,7 +519,7 @@ def evaluate(sess, enqueue_op, image_paths_placeholder, labels_placeholder, phas
 
 def save_variables_and_metagraph(sess, saver, summary_writer, model_dir, model_name, step):
     # Save the model checkpoint
-    print('flag1!!!Saving variables')
+    print('Saving variables')
     start_time = time.time()
     checkpoint_path = os.path.join(model_dir, 'model-%s.ckpt' % model_name)
     saver.save(sess, checkpoint_path, global_step=step, write_meta_graph=False)
@@ -617,13 +542,7 @@ def save_variables_and_metagraph(sess, saver, summary_writer, model_dir, model_n
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ckpt_interval', type=int, default=2000, help='intervals to save ckpt file')    
-    parser.add_argument('--validate_interval', type=int, default=2000, help='intervals to save ckpt file')
-    parser.add_argument('--show_info_interval', type=int, default=20, help='intervals to save ckpt file')
-    parser.add_argument('--base_lr_schedule', default=[0.001, 0.0005, 0.0003, 0.0001], help='base lr schedule')
-    parser.add_argument('--lr_steps', default=[40000, 60000, 80000], help='learning rate to train network')
-    parser.add_argument('--use_arcface', type=int,
-        help='whether use arcface', default=0)
+    
     parser.add_argument('--logs_base_dir', type=str, 
         help='Directory where to write event logs.', default='~/logs/facenet')
     parser.add_argument('--models_base_dir', type=str,
@@ -721,5 +640,4 @@ def parse_arguments(argv):
   
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     main(parse_arguments(sys.argv[1:]))
